@@ -282,7 +282,27 @@ function drawFinder(
   )
 }
 
-const SUN_GRID_RATIO = 0.82
+const SUN_GRID_RATIO = 0.70
+/** Small center dot — decorative only, kept small for scan reliability. */
+const SUN_CENTER_DOT_RATIO = 0.104
+/** Nudge decorative finders outward along radius (fraction of canvas size). */
+const SUN_FINDER_OUTSET_RATIO = 0.05
+
+function pushRadial(
+  x: number,
+  y: number,
+  cx: number,
+  cy: number,
+  amount: number,
+  maxDist?: number,
+) {
+  const dx = x - cx
+  const dy = y - cy
+  const dist = Math.hypot(dx, dy)
+  if (dist < 1) return { x, y }
+  const next = maxDist === undefined ? dist + amount : Math.min(dist + amount, maxDist)
+  return { x: cx + (dx / dist) * next, y: cy + (dy / dist) * next }
+}
 
 function moduleCenter(
   row: number,
@@ -319,7 +339,7 @@ function drawBullseyeFinder(
   ctx.fill()
 }
 
-/** Polar arc rendering: concentric ring dashes + circular finders. */
+/** Polar arc rendering: concentric ring dashes + circular finders + small center dot. */
 function drawSunStyleQr(
   ctx: CanvasRenderingContext2D,
   modules: { size: number; get: (row: number, col: number) => number },
@@ -333,6 +353,7 @@ function drawSunStyleQr(
   const cx = size / 2
   const cy = size / 2
   const outerR = size / 2 - 1
+  const centerDotR = size * SUN_CENTER_DOT_RATIO
   const gridSize = size * SUN_GRID_RATIO
   const gridOrigin = (size - gridSize) / 2
   const cell = gridSize / total
@@ -343,9 +364,13 @@ function drawSunStyleQr(
   ctx.fill()
 
   ctx.save()
+  ctx.beginPath()
+  ctx.arc(cx, cy, outerR, 0, Math.PI * 2)
+  ctx.clip()
   ctx.strokeStyle = fg
   ctx.lineCap = 'round'
   const strokeW = Math.max(1.8, cell * 0.38)
+  const maxArcR = outerR - strokeW * 0.55
 
   for (let row = 0; row < n; row++) {
     for (let col = 0; col < n; col++) {
@@ -355,11 +380,13 @@ function drawSunStyleQr(
       const dx = x - cx
       const dy = y - cy
       const r = Math.hypot(dx, dy)
+      if (r < centerDotR + strokeW * 0.5 || r > maxArcR + cell * 0.3) continue
+      const drawR = Math.min(r, maxArcR)
       const angle = Math.atan2(dy, dx)
-      const arcSpan = Math.max(0.04, (cell * 0.85) / r)
+      const arcSpan = Math.max(0.04, (cell * 0.85) / drawR)
       ctx.lineWidth = strokeW
       ctx.beginPath()
-      ctx.arc(cx, cy, r, angle - arcSpan / 2, angle + arcSpan / 2)
+      ctx.arc(cx, cy, drawR, angle - arcSpan / 2, angle + arcSpan / 2)
       ctx.stroke()
     }
   }
@@ -370,10 +397,19 @@ function drawSunStyleQr(
     [0, n - 7],
     [n - 7, 0],
   ]
+  const finderR = cell * 3.5
+  const finderOutset = size * SUN_FINDER_OUTSET_RATIO
+  const maxFinderDist = outerR - finderR - 2
   for (const [row, col] of finderOrigins) {
     const { x, y } = moduleCenter(row + 3, col + 3, margin, gridOrigin, cell)
-    drawBullseyeFinder(ctx, x, y, cell * 3.5, fg, colors.bg)
+    const { x: fx, y: fy } = pushRadial(x, y, cx, cy, finderOutset, maxFinderDist)
+    drawBullseyeFinder(ctx, fx, fy, finderR, fg, colors.bg)
   }
+
+  ctx.beginPath()
+  ctx.arc(cx, cy, centerDotR, 0, Math.PI * 2)
+  ctx.fillStyle = colors.bg
+  ctx.fill()
 }
 
 function drawQrModules(
@@ -485,7 +521,7 @@ export async function generateQrPng(options: {
     const { img, url } = await loadImage(options.logo)
     try {
       if (shape === 'sun') {
-        drawCenterLogo(ctx, img, size, QR_LOGO_RATIO, true)
+        drawCenterLogo(ctx, img, size, SUN_CENTER_DOT_RATIO * 2 * 0.95, true)
       } else {
         drawCenterLogo(ctx, img, size, shape === 'circle' ? 0.16 : QR_LOGO_RATIO)
       }
