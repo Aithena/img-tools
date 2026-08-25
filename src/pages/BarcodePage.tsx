@@ -436,7 +436,9 @@ export default function BarcodePage() {
               </div>
               {(qrShape === 'circle' || qrShape === 'sun') && (
                 <p className="wm-hint">
-                  仍是标准二维码，可被微信、相机扫码。微信小程序太阳码需官方接口，无法本地生成。
+                  {qrShape === 'sun'
+                    ? '标准二维码，仅模仿太阳码外形（环状弧线 + 圆形定位标），普通扫码器可识别。'
+                    : '仍是标准二维码，可被微信、相机扫码。'}
                 </p>
               )}
             </div>

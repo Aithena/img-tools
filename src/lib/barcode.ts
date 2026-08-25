@@ -76,15 +76,45 @@ function drawCenterLogo(
   img: HTMLImageElement,
   canvasSize: number,
   badgeRatio = QR_LOGO_RATIO,
+  circular = false,
 ) {
   const badge = Math.max(24, Math.round(canvasSize * badgeRatio))
   const pad = Math.max(4, Math.round(badge * 0.12))
-  const radius = Math.min(QR_LOGO_RADIUS, Math.floor(badge / 2))
   const x = (canvasSize - badge) / 2
   const y = (canvasSize - badge) / 2
   const inner = Math.max(8, badge - pad * 2)
   const ix = x + (badge - inner) / 2
   const iy = y + (badge - inner) / 2
+
+  if (circular) {
+    const cx = canvasSize / 2
+    const cy = canvasSize / 2
+    const outerR = badge / 2
+    const innerR = inner / 2
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(cx, cy, outerR, 0, Math.PI * 2)
+    ctx.fillStyle = '#ffffff'
+    ctx.fill()
+    ctx.restore()
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(cx, cy, innerR, 0, Math.PI * 2)
+    ctx.clip()
+
+    const nw = img.naturalWidth || img.width
+    const nh = img.naturalHeight || img.height
+    const scale = Math.max(inner / nw, inner / nh)
+    const dw = nw * scale
+    const dh = nh * scale
+    ctx.drawImage(img, cx - dw / 2, cy - dh / 2, dw, dh)
+    ctx.restore()
+    return
+  }
+
+  const radius = Math.min(QR_LOGO_RADIUS, Math.floor(badge / 2))
   const innerRadius = Math.min(radius, Math.floor(inner / 2))
 
   ctx.save()
@@ -252,31 +282,106 @@ function drawFinder(
   )
 }
 
-function drawSunburst(
-  ctx: CanvasRenderingContext2D,
-  size: number,
-  color: string,
+const SUN_INNER_HOLE_RATIO = 0.22
+const SUN_GRID_RATIO = 0.76
+
+function moduleCenter(
+  row: number,
+  col: number,
+  margin: number,
+  gridOrigin: number,
+  cell: number,
 ) {
+  return {
+    x: gridOrigin + (col + margin + 0.5) * cell,
+    y: gridOrigin + (row + margin + 0.5) * cell,
+  }
+}
+
+function drawBullseyeFinder(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  outerR: number,
+  fg: string | CanvasGradient,
+  bg: string,
+) {
+  ctx.fillStyle = fg
+  ctx.beginPath()
+  ctx.arc(x, y, outerR, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = bg
+  ctx.beginPath()
+  ctx.arc(x, y, outerR * (5 / 7), 0, Math.PI * 2)
+  ctx.fill()
+  ctx.fillStyle = fg
+  ctx.beginPath()
+  ctx.arc(x, y, outerR * (3 / 7), 0, Math.PI * 2)
+  ctx.fill()
+}
+
+/** Polar arc rendering: concentric ring dashes + circular finders + center hole. */
+function drawSunStyleQr(
+  ctx: CanvasRenderingContext2D,
+  modules: { size: number; get: (row: number, col: number) => number },
+  size: number,
+  colors: QrColors,
+  fg: string | CanvasGradient,
+) {
+  const n = modules.size
+  const margin = 2
+  const total = n + margin * 2
   const cx = size / 2
   const cy = size / 2
-  const outer = size / 2 - 1
-  const inner = outer * 0.9
-  ctx.save()
-  ctx.strokeStyle = color
-  ctx.lineWidth = Math.max(1.25, size * 0.01)
-  ctx.lineCap = 'round'
-  const rays = 40
-  for (let i = 0; i < rays; i++) {
-    const a = (i / rays) * Math.PI * 2
-    ctx.beginPath()
-    ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner)
-    ctx.lineTo(cx + Math.cos(a) * outer, cy + Math.sin(a) * outer)
-    ctx.stroke()
-  }
+  const outerR = size / 2 - 1
+  const innerHoleR = size * SUN_INNER_HOLE_RATIO
+  const gridSize = size * SUN_GRID_RATIO
+  const gridOrigin = (size - gridSize) / 2
+  const cell = gridSize / total
+
   ctx.beginPath()
-  ctx.arc(cx, cy, inner - ctx.lineWidth, 0, Math.PI * 2)
-  ctx.stroke()
+  ctx.arc(cx, cy, outerR, 0, Math.PI * 2)
+  ctx.fillStyle = colors.bg
+  ctx.fill()
+
+  ctx.save()
+  ctx.strokeStyle = fg
+  ctx.lineCap = 'round'
+  const strokeW = Math.max(1.8, cell * 0.38)
+
+  for (let row = 0; row < n; row++) {
+    for (let col = 0; col < n; col++) {
+      if (inFinder(row, col, n)) continue
+      if (!modules.get(row, col)) continue
+      const { x, y } = moduleCenter(row, col, margin, gridOrigin, cell)
+      const dx = x - cx
+      const dy = y - cy
+      const r = Math.hypot(dx, dy)
+      if (r < innerHoleR + cell * 0.4) continue
+      const angle = Math.atan2(dy, dx)
+      const arcSpan = Math.max(0.04, (cell * 0.85) / r)
+      ctx.lineWidth = strokeW
+      ctx.beginPath()
+      ctx.arc(cx, cy, r, angle - arcSpan / 2, angle + arcSpan / 2)
+      ctx.stroke()
+    }
+  }
   ctx.restore()
+
+  const finderOrigins: [number, number][] = [
+    [0, 0],
+    [0, n - 7],
+    [n - 7, 0],
+  ]
+  for (const [row, col] of finderOrigins) {
+    const { x, y } = moduleCenter(row + 3, col + 3, margin, gridOrigin, cell)
+    drawBullseyeFinder(ctx, x, y, cell * 3.5, fg, colors.bg)
+  }
+
+  ctx.beginPath()
+  ctx.arc(cx, cy, innerHoleR, 0, Math.PI * 2)
+  ctx.fillStyle = colors.bg
+  ctx.fill()
 }
 
 function drawQrModules(
@@ -292,7 +397,7 @@ function drawQrModules(
   const total = n + margin * 2
   const cell = box.size / total
   const rounded = shape !== 'square'
-  const dotted = shape === 'dots' || shape === 'circle' || shape === 'sun'
+  const dotted = shape === 'dots' || shape === 'circle'
 
   const finderOrigins: [number, number][] = [
     [0, 0],
@@ -359,14 +464,16 @@ export async function generateQrPng(options: {
 
   const fg = makeQrFill(ctx, colors, size, size)
 
-  if (circular) {
+  if (shape === 'sun') {
+    ctx.clearRect(0, 0, size, size)
+    drawSunStyleQr(ctx, qr.modules, size, colors, fg)
+  } else if (shape === 'circle') {
     ctx.clearRect(0, 0, size, size)
     ctx.beginPath()
     ctx.arc(size / 2, size / 2, size / 2 - 0.5, 0, Math.PI * 2)
     ctx.fillStyle = colors.bg
     ctx.fill()
-    if (shape === 'sun') drawSunburst(ctx, size, colors.fg)
-    const inner = Math.floor(size * (shape === 'sun' ? 0.62 : 0.7))
+    const inner = Math.floor(size * 0.7)
     const origin = (size - inner) / 2
     drawQrModules(
       ctx,
@@ -385,7 +492,11 @@ export async function generateQrPng(options: {
   if (options.logo) {
     const { img, url } = await loadImage(options.logo)
     try {
-      drawCenterLogo(ctx, img, size, circular ? 0.16 : QR_LOGO_RATIO)
+      if (shape === 'sun') {
+        drawCenterLogo(ctx, img, size, SUN_INNER_HOLE_RATIO * 2 * 0.92, true)
+      } else {
+        drawCenterLogo(ctx, img, size, shape === 'circle' ? 0.16 : QR_LOGO_RATIO)
+      }
     } finally {
       URL.revokeObjectURL(url)
     }
